@@ -1,0 +1,22 @@
+CardinalDirection
+
+North
+East
+South
+West
+Northeast
+Southeast
+Southwest
+Northwest
+
+RouteName
+
+40
+44
+D
+D Line
+
+StopName
+Leary Way
+
+

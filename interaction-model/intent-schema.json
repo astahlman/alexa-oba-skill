@@ -1,0 +1,59 @@
+{
+  "intents": [
+    {
+      "intent": "NextBusIntent",
+      "slots": [
+          {
+              "name": "StreetOne",
+              "type": "Street"
+          },
+          {
+              "name": "StreetTwo",
+              "type": "Street"
+          },
+          {
+              "name": "Direction",
+              "type": "CardinalDirection"
+          },
+          {
+              "name": "Route",
+              "type": "RouteName"
+          }
+      ]
+    },
+    {
+        "intent" : "SupplyRouteIntent",
+        "slots" : [
+            {
+                "name": "Route",
+                "type": "RouteName"
+            }
+        ]
+    },
+    {
+        "intent" : "SupplyStopIntent",
+        "slots" : [
+          {
+              "name": "StreetOne",
+              "type": "Street"
+          },
+          {
+              "name": "StreetTwo",
+              "type": "Street"
+          }
+        ]
+    },
+    {
+        "intent" : "SupplyDirectionIntent",
+        "slots" : [
+            {
+                "name": "Direction",
+                "type": "CardinalDirection"
+            }
+        ]
+    },
+    {
+        "intent": "AMAZON.HelpIntent"
+    }
+  ]
+}

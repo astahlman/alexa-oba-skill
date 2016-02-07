@@ -1,0 +1,17 @@
+NextBusIntent when is [the|my] next bus ([arriving|coming])
+NextBusIntent when [the|my] (next) bus is ([arriving|coming])
+NextBusIntent for [the|my] (next) bus
+NextBusIntent where (is) [the|my] (next) bus
+NextBusIntent ([when's| when is]) [the|my] (next) ({Direction} bound) {Route} (at {StreetOne} (and {StreetTwo}))
+NextBusIntent when [the|my] (next) ({Direction} bound) {Route} (at {StreetOne} (and {StreetTwo})) (is ([arriving|coming]))
+
+
+SupplyRouteIntent {Route}
+SupplyRouteIntent route {Route}
+SupplyRouteIntent bus {Route}
+SupplyRouteIntent the {Route}
+
+SupplyStopIntent {StreetOne} and {StreetTwo}
+
+SupplyDirectionIntent {Direction}
+SupplyDirectionIntent {Direction} bound

@@ -1,0 +1,631 @@
+#+TITLE: RadLibs, an Alexa Skill in Literate Clojure
+#+AUTHOR: astahlman
+#+PROPERTY: header-args :tangle no :cache yes :exports none :session *cider-repl LiterateRadLibs*
+#+HTML_HEAD: <style>pre.src {background-color: #303030; color: #e5e5e5;}</style>
+* Lambda Commands
+
+This command fetches the latest logs.
+
+#+BEGIN_SRC shell :tangle ../../fetch-logs.sh :shebang "#!/bin/bash"
+  set -e
+  LOG_STREAMS=$(aws logs describe-log-streams --log-group-name /aws/lambda/one-bus-away)
+  LOG_STREAM_NAME=$(echo $LOG_STREAMS | jq '.logStreams | sort_by("lastEventTimestamp") | reverse | .[0] | .logStreamName' | sed 's/"//g')
+  aws logs get-log-events --log-group-name /aws/lambda/one-bus-away --log-stream-name "$LOG_STREAM_NAME"
+#+END_SRC
+
+This command builds the uberjar, zips it up, and uploads it to Lambda.
+
+#+BEGIN_SRC shell :tangle ../../build.sh :shebang "#!/bin/bash"
+  set -e
+  lein uberjar
+  cd target
+  aws lambda update-function-code --function-name one-bus-away --zip-file fileb://./oba-0.1.0-standalone.jar
+#+END_SRC
+
+
+* Overview
+
+  This is the source code (no, that it is not a typo) for the Alexa
+  skill RadLibs. If you're reading this, your fancy should be tickled
+  by at least one of the following:
+
+  1. [[http://clojure.org/][Clojure]]
+  2. [[https://developer.amazon.com/public/solutions/alexa/alexa-skills-kit/getting-started-guide][The Alexa Skills Kit]]
+  3. [[https://aws.amazon.com/lambda/][AWS Lambda]]
+  4. [[http://www.literateprogramming.com/index.html][Literate programming]] - specifically Org-mode's [[http://orgmode.org/worg/org-contrib/babel/][Babel]]
+  5. Cheesy stories with phrases like, "Zounds! What a fuzzy time
+     we're going to have!"
+
+** How This Is Going To Work
+
+*** The Alexa Interface
+
+    When a user interacts with our RadLibs skill, Alexa will forward us
+    the request. For example, when a user opens RadLibs and starts a
+    new session, Alexa will send us a =LaunchRequest= that looks like
+    this.
+
+    #+begin_src javascript :eval no
+    {
+      "type": "LaunchRequest",
+      "requestId": "string",
+      "timestamp": "string"
+    }
+    #+end_src
+
+    When the user (let's call her Gertrude, because that is her name)
+    actually wants to do something, like say, start a new story, she
+    might say "Ask RadLibs to tell me the story of the Three Little
+    Pigs," at which point Alexa will send us an =IntentRequest= which
+    will look something like the following.
+
+    #+begin_src javascript :eval no
+    {
+      "type": "IntentRequest",
+      "requestId": "abc-123-xyz-789",
+      "timestamp": "2015-05-13T12:34:56Z",
+      "intent": {
+        "name": "StartNewStory",
+        "slots": {
+          "string": {
+            "name": "StoryTitle",
+            "value": "The Three Little Pigs"
+          }
+        }
+      }
+    }
+    #+end_src
+
+    So we need some endpoint that can accept these requests and return
+    a response that tells Alexa how to respond to Gertrude. Upon
+    receiving the above request, we'll need to return something like
+    this:
+
+    #+begin_src javascript :eval no
+      {
+          "version": "1.0",
+          "sessionAttributes": {
+              "story_id": "three_little_pigs",
+              "blanks" : {
+                  "filled" : [],
+                  "unfilled" : [
+                      {
+                          "prompt" : "noun",
+                          "response" : null,
+                      },
+                      {
+                          "prompt" : "adjective",
+                          "response" : null
+                      },
+                      {
+                          "prompt" : "verb ending in -ing",
+                          "response" : null
+                      }
+                  ]
+              },
+              "response": {
+                  "outputSpeech": {
+                      "type": "PlainText",
+                      "text": "Okay, I will tell you the story of The Three Little Pigs. But first, I'll need some help. Can you give me a noun?",
+                  },
+                  "reprompt": {
+                      "outputSpeech": {
+                          "type": "PlainText",
+                          "text": "I'm still waiting for a noun.",
+                      }
+                  },
+                  "shouldEndSession": boolean
+              }
+          }
+    #+end_src
+
+    Notice that we can include =sessionAttributes= in our response.
+    This is nice, because it gives us a place to stuff all of our
+    state and let someone else manage it for us. Concretely, it means
+    we don't need some sort of database to keep track of which story
+    Gertrude is currently playing and which blanks she has filled in.
+
+    So the business logic in our endpoint is really pretty simple. If
+    Gertrude wants to start a new story, we welcome her and prompt her
+    for the first blank in the story she has chosen. If Gertrude
+    already has a story in progress, we fill in the blank with the word
+    or phrase she supplied. Then we either prompt for the next blank or
+    read back the completed story, as appropriate.
+
+*** The Backend
+
+    All of this communication takes place over good old HTTP, so if we
+    were weirdo masochists who enjoy caring for web servers then we
+    could totallqy run our own. But we aren't weirdo masochists, are
+    we? *Are we*, Kevin? So let's just use AWS Lambda, which is
+    conveniently integrated with Alexa and gives us 1 million free
+    requests per month (that's a lot of RadLibs). All you have to do
+    is define a Lambda function that handles requests and then sit
+    back while some other poor sap carries the pager.
+
+    "But wait," I pretend to hear you saying, "Lambda supports Java
+    and Javascript, and those are icky!" I agree, friend - with the
+    sentiment if not with your choice of adjective. No sensible person
+    would every willingly write Java outside of normal business hours.
+    And fortunately you don't have to, because Clojure runs on the
+    JVM! We'll write our business logic in Clojure and then use the
+    [[http://leiningen.org/][Leiningen]] build system to compile our Clojure source to .jar file,
+    which we can upload to Lambda.
+
+    Enough talk, let's write some code.
+
+* Setting things up
+
+  We use the =:gen-class:= macro to export a Java .class file
+  corresponding to this namespace. Our class will be called
+  =rad_libs.core.= Our Java class implements the AWS Lambda
+  =RequestStreamHandler= interface.
+
+  #+begin_src clojure :results silent
+    (ns rad-libs.core
+      (:require [clojure.data.json :as json]
+                [clojure.string :as s]
+                [clojure.java.io :as io]
+                [clojure.pprint :refer [pprint]]
+                [rad-libs.phrases :as phrases])
+      (:use clojure.test)
+      (:gen-class
+       :implements [com.amazonaws.services.lambda.runtime.RequestStreamHandler]))
+  #+end_src
+
+  Here is our definition of the =handleRequest= function defined by
+  the =RequestStreamHandler= interface. All we do here is parse the
+  incoming JSON to a pretty Clojure map and then pass the request off
+  to the =respond-to= handler, which we haven't defined yet.
+  
+  #+begin_src clojure :results silent
+    (declare log)
+    (declare pp-str)
+    (declare respond-to)
+    (declare key->keyword)
+
+    (defn -handleRequest
+      "Entry point for our Lambda request handler.
+       is - Input stream with JSON representing request
+       os - Ouput stream of our response, also JSON"
+      [this is os _]
+      (let [w (io/writer os)
+            request (-> is
+                        (io/reader)
+                        (json/read :key-fn key->keyword))
+            response (respond-to request)]
+        (json/write response w :key-fn name)
+        (pprint response)
+        (.flush w)))
+  #+end_src
+
+  Two things to notice here:
+
+  1. The '-' prefix on the =-handleRequest= method. This indicates
+     that the generated Java class corresponding to this Clojure
+     namespace should include a method called =handleRequest=. That
+     method will simply delegate to the =-handleRequest= function.
+  2. The first parameter of the =-handleRequest= function, =this=,
+     which refers to the actual Java object. Since we aren't storing
+     any state in the object, we don't really care about this. We can
+     also ignore the last parameter, which is a Context object from
+     the Lambda library. It's idiomatic in Clojure to name parameters
+     that we don't care about with a =_=.
+
+  You can verify all of this by compiling and using =javap= to inspect
+  the =rad_libs.core= class.
+  
+  #+begin_src sh :results output verbatim pp replace :tangle no :session no
+  lein compile :all
+  cd ../../target/classes
+  javap rad_libs.core
+  #+end_src
+
+  #+RESULTS[9103cb2c3ff7271c6a9100592e06f1b38a08d7e5]:
+  #+begin_example
+  public class rad_libs.core implements com.amazonaws.services.lambda.runtime.RequestStreamHandler {
+    public static {};
+    public rad_libs.core();
+    public boolean equals(java.lang.Object);
+    public java.lang.String toString();
+    public int hashCode();
+    public java.lang.Object clone();
+    public void handleRequest(java.io.InputStream, java.io.OutputStream, com.amazonaws.services.lambda.runtime.Context);
+    public static void main(java.lang.String[]);
+  }
+#+end_example
+
+* Handling Requests
+
+  According to the [[https://developer.amazon.com/public/solutions/alexa/alexa-skills-kit/docs/alexa-skills-kit-interface-reference#Request Format][documentation]], the syntax of a request is as
+  follows:
+
+   #+begin_src javascript :eval no
+     {
+       "version": "string",
+       "session": {
+         "new": boolean,
+         "sessionId": "string",
+         "application": {
+           "applicationId": "string"
+         },
+         "attributes": {
+           "string": object
+         },
+         "user": {
+           "userId": "string",
+           "accessToken": "string"
+         }
+       },
+       "request": object
+     }
+   #+end_src
+
+   Our skill will need to handle three types of requests:
+
+   1. Launch Request
+   2. Intent Request
+   3. Session Ended Request
+
+   We define =respond-to= as a multimethod which dispatches on the
+   request type.
+
+   #+begin_src clojure
+     (defmulti respond-to
+       (fn [req]
+         (get-in req [:request :type])))
+   #+end_src
+
+   #+RESULTS[8e5c06ee08078822fe3d08ed248aec64cc48427e]:
+   : #'rad-libs.core/respond-to
+
+** Launch Request
+
+   #+begin_src javascript :eval no
+     {
+       "type": "LaunchRequest",
+       "requestId": "string",
+       "timestamp": "string"
+     }
+   #+end_src
+
+   When we get a launch request, all we need to do is return a
+   plain-text response welcoming Gertrude to the skill.
+    
+   #+begin_src clojure
+
+     (declare text-response)
+
+     (defmethod respond-to "LaunchRequest" [req]
+       (log (str "Handling launch request: " (pp-str req)))
+       (text-response {:text phrases/modal-welcome-prompt
+                       :reprompt phrases/modal-welcome-reprompt}))
+
+     (declare a-request)
+
+     (deftest test-handle-launch-request
+       (testing "We welcome the user when they open the skill"
+         (let [launch-request (assoc a-request
+                                     :request
+                                     {:type "LaunchRequest"
+                                      :request-id :irrelevant
+                                      :timestamp :irrelevant})]
+           (is (= {:output-speech {:type "PlainText"
+                                   :text phrases/modal-welcome-prompt}
+                   :reprompt {:output-speech
+                              {:type "PlainText"
+                               :text phrases/modal-welcome-reprompt}}
+                   :should-end-session? false}
+                  (:response (respond-to launch-request)))))))
+   #+end_src
+
+   #+RESULTS[34a3b592b8c2fa0b7d112f3ff87b8b3f4155004a]:
+   : #'rad-libs.core/text-response#object[clojure.lang.MultiFn 0x540d1eb5 "clojure.lang.MultiFn@540d1eb5"]#'rad-libs.core/a-request#'rad-libs.core/test-handle-launch-request
+
+** Intent Request
+   #+begin_src javascript :eval no
+     {
+       "type": "IntentRequest",
+       "requestId": "string",
+       "timestamp": "string",
+       "intent": {
+         "name": "string",
+         "slots": {
+           "string": {
+             "name": "string",
+             "value": "string"
+           }
+         }
+       }
+     }
+   #+end_src
+
+   We define the intents we support in the [[https://developer.amazon.com/public/solutions/alexa/alexa-skills-kit/docs/alexa-skills-kit-interaction-model-reference][interaction model]]. Let's
+   keep it simple and say that there are only three things that a
+   user will be able to ask us to do: ask for help, start a story,
+   and fill in a blank. To ask for help, we use the built-in intent
+   provided by Alexa. The other two we define ourselves.
+
+*** Interaction Model
+
+    We define our interactions model in JSON.
+
+    #+begin_src javascript :tangle ../../interaction-model/intent-schema.json :eval no
+      {
+        "intents": [
+          {
+            "intent": "StartStory",
+            "slots": []
+          },
+          {
+            "intent": "FillBlank",
+            "slots": [
+              {
+                "name": "Blank",
+                "type": "LITERAL"
+              }
+            ]
+          },
+          {
+              "intent": "AMAZON.HelpIntent",
+          }
+        ]
+      }
+    #+end_src
+
+*** Handling Intents
+
+    #+begin_src clojure
+     
+      (defmulti on-intent
+        (fn [intent session]
+          (:name intent)))
+
+      (defmethod respond-to "IntentRequest" [req]
+        (log (str "Handling intent request: " (pp-str req)))
+        (on-intent (get-in req [:request :intent]) (:session req)))
+         
+    #+end_src
+
+    #+RESULTS[3751ceaf3421e0f3cbe4dbe303451397de033bd3]:
+    : nil#object[clojure.lang.MultiFn 0x540d1eb5 "clojure.lang.MultiFn@540d1eb5"]
+
+**** Help Intent
+
+     The Help intent is the easiest to handle. If a user asks for
+     help, all we do is return a plain-text, static response. We
+     include a plain-text, static reprompt in case the user doesn't
+     respond.
+      
+     #+begin_src clojure
+       (defmethod on-intent "AMAZON.HelpIntent" [intent session]
+         (text-response {:text phrases/get-help-response}))
+
+       (deftest test-help-intent
+         (testing "When a user asks for help, we tell them how to use RadLibs"
+           (let [help-request (assoc a-request
+                                     :request
+                                     {:type "IntentRequest"
+                                      :intent {:name "AMAZON.HelpIntent"}})]
+             (is (= {:output-speech {:type "PlainText"
+                                     :text phrases/get-help-response}
+                     :should-end-session? false}
+                    (:response (respond-to help-request)))))))
+     #+end_src
+
+     #+RESULTS[92b39d0771ec3614643b27a7f0e6c75938750db6]:
+     : #object[clojure.lang.MultiFn 0x2a694618 "clojure.lang.MultiFn@2a694618"]#'rad-libs.core/test-help-intent
+
+**** StartStoryIntent
+
+     When the user asks to start a story, we should take one of two
+     actions:
+
+     1. If the user is currently in the middle of a story, we should
+        confirm that they want to abandon the current story.
+        1. If yes, start a new story.
+        2. If no, prompt again for the current blank.
+     2. If the user is not in the middle of a story, start a new
+        story.
+         
+     #+begin_src clojure
+       (declare extract-blanks)
+       (declare fetch-story)
+       (declare prompt-for-blank reprompt-for-blank)
+
+       (defmethod on-intent "StartStoryIntent"
+         [intent session]
+         (if (= (:state (:attributes session)) "InStory")
+           (text-response {:text phrases/confirm-abandon-story
+                           :reprompt phrases/confirm-abandon-story
+                           :session (assoc-in session
+                                              [:attributes :state]
+                                              "ConfirmAbandon")})
+           (let [new-story (fetch-story)
+                 first-blank (first (extract-blanks new-story))]
+             (text-response {:text (prompt-for-blank (:type first-blank))
+                             :reprompt (reprompt-for-blank (:type first-blank))
+                             :session (assoc session
+                                             :attributes
+                                             {:state "InStory"
+                                              :story new-story})}))))
+
+       (declare prompt-for-a-blank?)
+       (declare confirmation-to-abandon?)
+
+       (deftest test-start-story
+         (let [start-story-request (assoc a-request
+                                          :request
+                                          {:type "IntentRequest"
+                                           :request-id :irrelevant
+                                           :timestamp :irrelevant
+                                           :intent {:name "StartStoryIntent"}})]
+           (testing "We prompt the user for the first blank when they start a new story"
+             (is (prompt-for-a-blank? (respond-to start-story-request))))
+           (let [abandon-story-request (assoc-in start-story-request
+                                                 [:session :attributes :state]
+                                                 "InStory")]
+             (testing "We confirm the user wants a new story before abandoning a story in progress"
+               (is (confirmation-to-abandon? (respond-to abandon-story-request)))))))
+
+       (defn prompt-for-a-blank? [response]
+         (let [blank-types #{"verb"
+                             "noun"
+                             "adjective"
+                             "plural noun"
+                             "adverb"
+                             "verb ending in i.n.g."
+                             "exclamation"
+                             "name of person"
+                             "number"}]
+           (and
+            (not (:should-end-session? response))
+            (contains? blank-types (get-in response [:response :output-speech :text]))
+            (some (fn [blank-type]
+                    (.contains
+                     (get-in response [:response :reprompt :output-speech :text])
+                     blank-type))
+                  blank-types))))
+
+       (defn confirmation-to-abandon? [response]
+         (and
+          (= phrases/confirm-abandon-story (get-in response [:response :output-speech :text]))
+          (= phrases/confirm-abandon-story (get-in response [:response :reprompt :output-speech :text]))))
+     #+end_src
+
+     #+RESULTS[d67390a234d0f236f61089f27cb8a49b8fc272b5]:
+     : #'rad-libs.core/extract-blanks#'rad-libs.core/fetch-story#'rad-libs.core/reprompt-for-blank#object[clojure.lang.MultiFn 0x71c9a7e2 "clojure.lang.MultiFn@71c9a7e2"]#'rad-libs.core/prompt-for-a-blank?#'rad-libs.core/confirmation-to-abandon?#'rad-libs.core/test-start-story#'rad-libs.core/prompt-for-a-blank?#'rad-libs.core/confirmation-to-abandon?
+
+**** FillBlankIntent
+
+
+** Session Ended Request
+   #+begin_src javascript :eval no
+     {
+       "type": "SessionEndedRequest",
+       "requestId": "string",
+       "timestamp": "string",
+       "reason": "string"
+     }
+   #+end_src
+
+* Stories
+  
+** Fetching stories
+
+    We keep our story templates in S3 so that we can update our content
+    and our skill independently. However, in case of failure retrieving
+    from our external store, we fail gracefully and return a default
+    story.
+
+    #+begin_src clojure
+      (defn fetch-story []
+        "For now, just return a story in memory. TODO: Fetch from S3"
+        "Hello {noun}, it's a {adjective} day!")
+    #+end_src
+
+    #+RESULTS[37fe9f834d9b7772093cc8039c89e9caa8dfed42]:
+    : #'rad-libs.core/fetch-story
+
+** Filling in the blanks
+
+   Blanks are delimited in a story template by curly braces.
+   
+   #+begin_src clojure
+     (defn extract-blanks [template]
+       (loop [match (re-matcher #"\{[\w \.-]+\}" template)
+              result []]
+         (if (.find match)
+           (recur match (conj result
+                              {:start (.start match)
+                               :end (.end match)
+                               :type (clojure.string/replace (.group match) #"\{|\}" "")}))
+           result)))
+   #+end_src
+
+   #+RESULTS[c717df7a195ef0e33871bfe80d212cd07c7d5bba]:
+   : #'rad-libs.core/extract-blanks
+
+   Each blank is associated with a type, which we use to prompt the
+   user.
+
+   #+begin_src clojure
+     (defn prompt-for-blank [blank-type]
+       blank-type)
+
+     (defn reprompt-for-blank [blank-type]
+       (str phrases/still-waiting-for-a blank-type))
+   #+end_src
+
+   #+RESULTS[3c5d38dcab37edae2a71b2443b4e1420fbc96483]:
+   : #'rad-libs.core/prompt-for-blank#'rad-libs.core/reprompt-for-blank
+
+   
+
+* Test Data
+  
+  #+begin_src clojure
+    (def a-request
+      {:version "1",
+       :session {:new false,
+                 :session-id "session-xyz",
+                 :application {:application-id "app-123"},
+                 :attributes {}},
+       :request nil})
+  #+end_src
+
+  #+RESULTS[096c32e21584bd28597867920af639c7a58f11e6]:
+  : #'rad-libs.core/a-request
+
+* Utilities
+
+  #+begin_src clojure
+    (declare response-skeleton)
+
+    (defn text-response [{:keys [text reprompt]}]
+      (let [response {:output-speech {:type "PlainText"
+                                      :text text}
+                      :should-end-session? false}
+            response (if reprompt
+                       (assoc response
+                              :reprompt
+                              {:output-speech {:type "PlainText"
+                                               :text reprompt}})
+                       response)]
+        (assoc response-skeleton
+               :response response)))
+
+    (def response-skeleton
+      {:version "1"
+       :session nil
+       :response nil})
+
+    (defn pp-str
+      "Pretty-prints to a string, instead of *out*"
+      [x]
+      (with-out-str (clojure.pprint/pprint x)))
+
+    (defn log 
+      "TODO: Implement this"
+      [msg]
+      (println (str "INFO: " msg)))
+  #+end_src
+
+  #+RESULTS[f451a8520535cd64d938903af9045c44f35d2a21]:
+  : #'rad-libs.core/response-skeleton#'rad-libs.core/text-response#'rad-libs.core/response-skeleton#'rad-libs.core/pp-str#'rad-libs.core/log
+  
+* Phrases
+
+  #+begin_src clojure :tangle phrases.clj
+    (ns rad-libs.phrases)
+
+    (def ^:const modal-welcome-prompt "Welcome to Mad Libs! We can start a new story whenever you're ready.")
+    (def ^:const modal-welcome-reprompt "When you're ready, ask me to start a new story.")
+    (def ^:const get-help-response "You can ask me to start a new story at any time. Once you've filled in all the blanks, I'll read your story back to you.")
+    (def ^:const confirm-abandon-story "Are you sure you want to abandon this story?")
+    (def ^:const still-waiting-for-a "I'm still waiting for a ")
+  #+end_src
+
+  #+RESULTS[ad41709a2e5aa74bf59932f7581f6420a8458be1]:
+  : nil#'rad-libs.phrases/modal-welcome-prompt#'rad-libs.phrases/modal-welcome-reprompt#'rad-libs.phrases/get-help-response#'rad-libs.phrases/confirm-abandon-story#'rad-libs.phrases/still-waiting-for-a
+

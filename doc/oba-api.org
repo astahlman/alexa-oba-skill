@@ -1,0 +1,967 @@
+#+TITLE: OneBusAway API
+#+PROPERTY: header-args:shell :tangle no :exports none :results pp
+
+* Authentication
+The API requires a (free) API key.
+
+#+BEGIN_SRC shell :results silent
+  OBA_KEY=$(<$HOME/.oba-key)
+#+END_SRC
+
+* Routes
+
+#+BEGIN_SRC shell :results drawer
+  OBA_KEY=$(<$HOME/.oba-key)
+  curl "http://api.pugetsound.onebusaway.org/api/where/routes-for-agency/1.json?key=$OBA_KEY" 2&>/dev/null | python -m "json.tool" | tee /tmp/a
+#+END_SRC
+
+Let's take route 44. The =shortName= is the name that I expect most
+people will use in natural conversation. We'll need the =id= to query
+for stops and arrival times.
+
+#+BEGIN_SRC shell
+  jq '.data.list | map(select(.shortName == "44"))' /tmp/a
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+[
+  {
+    "agencyId": "1",
+    "color": "",
+    "description": "Ballard - Montlake",
+    "id": "1_100224",
+    "longName": "",
+    "shortName": "44",
+    "textColor": "",
+    "type": 3,
+    "url": "http://metro.kingcounty.gov/schedules/044/n0.html"
+  }
+]
+#+end_example
+
+Let's capture the id so we can use it later.
+
+#+BEGIN_SRC shell
+  route_44=`jq '.data.list | map(select(.shortName == "44"))[0].id' /tmp/a | sed 's/"//g'`
+  echo $route_44
+#+END_SRC
+
+#+RESULTS:
+: 1_100224
+
+* Stops
+
+Given the =id= of a route, we can look up its stops. Stops have a
+name, which so far always appears to be a cross-section. The
+cross-section is separated by an ampersand character and includes
+abbreviations for ordinal directions and abbreviations like "St", "Pkwy",
+"Ave", etc.
+
+#+BEGIN_SRC shell :results drawer pp
+  OBA_KEY=$(<~/.oba-key)
+  curl "http://api.pugetsound.onebusaway.org/api/where/stops-for-route/1_100224.json?key=$OBA_KEY" | python -m json.tool | jq '.data.references.stops'
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+[
+  {
+    "code": "10911",
+    "direction": "E",
+    "id": "1_10911",
+    "lat": 47.661205,
+    "locationType": 0,
+    "lon": -122.313477,
+    "name": "NE 45th St & University Way NE",
+    "routeIds": [
+      "1_100223",
+      "1_100224",
+      "1_100447",
+      "1_100264",
+      "1_100059",
+      "1_100088",
+      "40_586",
+      "29_810",
+      "29_821",
+      "29_855",
+      "29_860",
+      "29_871",
+      "29_880"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "10912",
+    "direction": "S",
+    "id": "1_10912",
+    "lat": 47.65937,
+    "locationType": 0,
+    "lon": -122.312096,
+    "name": "15th Ave NE & NE 43rd St",
+    "routeIds": [
+      "1_100223",
+      "1_100224",
+      "1_100228",
+      "1_100447",
+      "1_100264",
+      "1_100059",
+      "1_100088",
+      "1_100162",
+      "40_100511",
+      "40_100451",
+      "40_586"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "10914",
+    "direction": "S",
+    "id": "1_10914",
+    "lat": 47.656422,
+    "locationType": 0,
+    "lon": -122.312164,
+    "name": "15th Ave NE & NE Campus Pkwy",
+    "routeIds": [
+      "1_100223",
+      "1_100224",
+      "1_100228",
+      "1_100447",
+      "1_100264",
+      "1_100059",
+      "1_100088",
+      "1_100162",
+      "40_100511",
+      "40_100451",
+      "40_586"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "10917",
+    "direction": "S",
+    "id": "1_10917",
+    "lat": 47.655048,
+    "locationType": 0,
+    "lon": -122.312195,
+    "name": "15th Ave NE & NE 40th St",
+    "routeIds": [
+      "1_100140",
+      "1_100223",
+      "1_100224",
+      "1_100228",
+      "1_100059",
+      "1_100088",
+      "1_100162",
+      "1_100168",
+      "40_100235",
+      "40_100511",
+      "40_100451",
+      "40_586"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "11352",
+    "direction": "N",
+    "id": "1_11352",
+    "lat": 47.658668,
+    "locationType": 0,
+    "lon": -122.311905,
+    "name": "15th Ave NE & NE 42nd St",
+    "routeIds": [
+      "1_100223",
+      "1_100224",
+      "1_100228",
+      "1_100447",
+      "1_100264",
+      "1_100059",
+      "1_100162",
+      "1_100168",
+      "40_100235",
+      "40_100511",
+      "40_100451",
+      "29_810",
+      "29_821",
+      "29_855",
+      "29_860",
+      "29_871",
+      "29_880"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "11354",
+    "direction": "W",
+    "id": "1_11354",
+    "lat": 47.661346,
+    "locationType": 0,
+    "lon": -122.313889,
+    "name": "NE 45th St & Brooklyn Ave NE",
+    "routeIds": [
+      "1_100223",
+      "1_100224",
+      "1_100447",
+      "1_100264",
+      "1_100059",
+      "1_100215",
+      "29_810",
+      "29_821",
+      "29_855",
+      "29_860",
+      "29_871",
+      "29_880"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "17310",
+    "direction": "W",
+    "id": "1_17310",
+    "lat": 47.661461,
+    "locationType": 0,
+    "lon": -122.335556,
+    "name": "N 45th St & Wallingford Ave N",
+    "routeIds": [
+      "1_100053",
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "17410",
+    "direction": "E",
+    "id": "1_17410",
+    "lat": 47.661316,
+    "locationType": 0,
+    "lon": -122.335632,
+    "name": "N 45th St & Wallingford Ave N",
+    "routeIds": [
+      "1_100053",
+      "1_100224",
+      "1_100277"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "18085",
+    "direction": "E",
+    "id": "1_18085",
+    "lat": 47.668049,
+    "locationType": 0,
+    "lon": -122.398415,
+    "name": "32nd Ave NW & NW Market St",
+    "routeIds": [
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "18090",
+    "direction": "E",
+    "id": "1_18090",
+    "lat": 47.667667,
+    "locationType": 0,
+    "lon": -122.396339,
+    "name": "NW 54th St & 30th Ave NW",
+    "routeIds": [
+      "1_102572",
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "18100",
+    "direction": "E",
+    "id": "1_18100",
+    "lat": 47.668591,
+    "locationType": 0,
+    "lon": -122.392502,
+    "name": "NW Market St & 28th Ave NW",
+    "routeIds": [
+      "1_100062",
+      "1_102572",
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "18120",
+    "direction": "E",
+    "id": "1_18120",
+    "lat": 47.668613,
+    "locationType": 0,
+    "lon": -122.385468,
+    "name": "NW Market St & Ballard Ave NW",
+    "routeIds": [
+      "1_100062",
+      "1_100071",
+      "1_102572",
+      "1_102574",
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "18740",
+    "direction": "W",
+    "id": "1_18740",
+    "lat": 47.668747,
+    "locationType": 0,
+    "lon": -122.386368,
+    "name": "NW Market St & Ballard Ave NW",
+    "routeIds": [
+      "1_100062",
+      "1_100071",
+      "1_102572",
+      "1_102574",
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "18760",
+    "direction": "W",
+    "id": "1_18760",
+    "lat": 47.668724,
+    "locationType": 0,
+    "lon": -122.392639,
+    "name": "NW Market St & 28th Ave NW",
+    "routeIds": [
+      "1_100062",
+      "1_102572",
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "18785",
+    "direction": "W",
+    "id": "1_18785",
+    "lat": 47.668709,
+    "locationType": 0,
+    "lon": -122.396057,
+    "name": "NW Market St & 30th Ave NW",
+    "routeIds": [
+      "1_100062",
+      "1_102572",
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29200",
+    "direction": "E",
+    "id": "1_29200",
+    "lat": 47.661995,
+    "locationType": 0,
+    "lon": -122.346962,
+    "name": "N 46th St & Aurora Ave N",
+    "routeIds": [
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29213",
+    "direction": "E",
+    "id": "1_29213",
+    "lat": 47.668606,
+    "locationType": 0,
+    "lon": -122.381287,
+    "name": "NW Market St & 20th Ave NW",
+    "routeIds": [
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29215",
+    "direction": "E",
+    "id": "1_29215",
+    "lat": 47.668598,
+    "locationType": 0,
+    "lon": -122.375847,
+    "name": "NW Market St & 15th Ave NW",
+    "routeIds": [
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29217",
+    "direction": "E",
+    "id": "1_29217",
+    "lat": 47.668594,
+    "locationType": 0,
+    "lon": -122.370453,
+    "name": "NW Market St & 11th Ave NW",
+    "routeIds": [
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29219",
+    "direction": "E",
+    "id": "1_29219",
+    "lat": 47.668598,
+    "locationType": 0,
+    "lon": -122.36554,
+    "name": "NW Market St & 8th Ave NW",
+    "routeIds": [
+      "1_100169",
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29220",
+    "direction": "E",
+    "id": "1_29220",
+    "lat": 47.668613,
+    "locationType": 0,
+    "lon": -122.363037,
+    "name": "NW Market St & 6th Ave NW",
+    "routeIds": [
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29222",
+    "direction": "SE",
+    "id": "1_29222",
+    "lat": 47.664814,
+    "locationType": 0,
+    "lon": -122.359528,
+    "name": "NW Market St & NW 50th St",
+    "routeIds": [
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29223",
+    "direction": "SE",
+    "id": "1_29223",
+    "lat": 47.663364,
+    "locationType": 0,
+    "lon": -122.357872,
+    "name": "NW Market St & NW 48th St",
+    "routeIds": [
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29225",
+    "direction": "E",
+    "id": "1_29225",
+    "lat": 47.662067,
+    "locationType": 0,
+    "lon": -122.353638,
+    "name": "N 46th St & Phinney Ave N",
+    "routeIds": [
+      "1_100229",
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29227",
+    "direction": "E",
+    "id": "1_29227",
+    "lat": 47.662075,
+    "locationType": 0,
+    "lon": -122.349762,
+    "name": "N 46th St & Fremont Ave N",
+    "routeIds": [
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29231",
+    "direction": "E",
+    "id": "1_29231",
+    "lat": 47.661316,
+    "locationType": 0,
+    "lon": -122.34166,
+    "name": "N 45th St & Stone Way N",
+    "routeIds": [
+      "1_100053",
+      "1_100224",
+      "1_100277"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29232",
+    "direction": "E",
+    "id": "1_29232",
+    "lat": 47.661316,
+    "locationType": 0,
+    "lon": -122.338692,
+    "name": "N 45th St & Woodlawn Ave N",
+    "routeIds": [
+      "1_100053",
+      "1_100224",
+      "1_100277"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29234",
+    "direction": "E",
+    "id": "1_29234",
+    "lat": 47.661308,
+    "locationType": 0,
+    "lon": -122.331032,
+    "name": "N 45th St & Corliss Ave N",
+    "routeIds": [
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29236",
+    "direction": "E",
+    "id": "1_29236",
+    "lat": 47.661278,
+    "locationType": 0,
+    "lon": -122.326347,
+    "name": "NE 45th St & Thackeray Pl NE",
+    "routeIds": [
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29240",
+    "direction": "SE",
+    "id": "1_29240",
+    "lat": 47.652245,
+    "locationType": 0,
+    "lon": -122.311211,
+    "name": "NE Pacific St & 15th Ave NE",
+    "routeIds": [
+      "1_100140",
+      "1_100223",
+      "1_100224",
+      "1_100228",
+      "1_100059",
+      "1_100088",
+      "1_100162",
+      "1_100168",
+      "40_100235",
+      "40_100511",
+      "40_100451",
+      "40_586"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29242",
+    "direction": "NE",
+    "id": "1_29242",
+    "lat": 47.650486,
+    "locationType": 0,
+    "lon": -122.306839,
+    "name": "NE Pacific Pl & NE Pacific St",
+    "routeIds": [
+      "1_100224",
+      "1_100228"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29410",
+    "direction": "NW",
+    "id": "1_29410",
+    "lat": 47.650509,
+    "locationType": 0,
+    "lon": -122.307358,
+    "name": "NE Pacific St & NE Pacific Pl",
+    "routeIds": [
+      "1_100140",
+      "1_100223",
+      "1_100224",
+      "1_100228",
+      "1_100059",
+      "1_100162",
+      "1_100168",
+      "40_100235",
+      "40_100511",
+      "40_100451"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29430",
+    "direction": "N",
+    "id": "1_29430",
+    "lat": 47.653572,
+    "locationType": 0,
+    "lon": -122.312027,
+    "name": "15th Ave NE & NE Pacific St",
+    "routeIds": [
+      "1_100223",
+      "1_100224",
+      "1_100228",
+      "1_100059",
+      "1_100162",
+      "1_100168",
+      "40_100235",
+      "40_100511",
+      "40_100451"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29440",
+    "direction": "N",
+    "id": "1_29440",
+    "lat": 47.655708,
+    "locationType": 0,
+    "lon": -122.311989,
+    "name": "15th Ave NE & NE Campus Pkwy",
+    "routeIds": [
+      "1_100223",
+      "1_100224",
+      "1_100228",
+      "1_100059",
+      "1_100162",
+      "1_100168",
+      "40_100235",
+      "40_100511",
+      "40_100451"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29453",
+    "direction": "E",
+    "id": "1_29453",
+    "lat": 47.661255,
+    "locationType": 0,
+    "lon": -122.321152,
+    "name": "NE 45th St & 7th Ave NE",
+    "routeIds": [
+      "1_100224",
+      "1_100207",
+      "29_810",
+      "29_821",
+      "29_855",
+      "29_860",
+      "29_871",
+      "29_880"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29455",
+    "direction": "W",
+    "id": "1_29455",
+    "lat": 47.661373,
+    "locationType": 0,
+    "lon": -122.318214,
+    "name": "NE 45th St & 9th Ave NE",
+    "routeIds": [
+      "1_100224",
+      "1_100059",
+      "1_100215",
+      "29_810",
+      "29_821",
+      "29_855",
+      "29_860",
+      "29_871",
+      "29_880"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29470",
+    "direction": "W",
+    "id": "1_29470",
+    "lat": 47.661392,
+    "locationType": 0,
+    "lon": -122.321304,
+    "name": "NE 45th St & 7th Ave NE",
+    "routeIds": [
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29480",
+    "direction": "W",
+    "id": "1_29480",
+    "lat": 47.661411,
+    "locationType": 0,
+    "lon": -122.325386,
+    "name": "NE 45th St & Latona Ave NE",
+    "routeIds": [
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29500",
+    "direction": "W",
+    "id": "1_29500",
+    "lat": 47.661442,
+    "locationType": 0,
+    "lon": -122.331238,
+    "name": "N 45th St & Sunnyside Ave N",
+    "routeIds": [
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29530",
+    "direction": "W",
+    "id": "1_29530",
+    "lat": 47.661461,
+    "locationType": 0,
+    "lon": -122.339653,
+    "name": "N 45th St & Woodlawn Ave N",
+    "routeIds": [
+      "1_100053",
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29540",
+    "direction": "W",
+    "id": "1_29540",
+    "lat": 47.661461,
+    "locationType": 0,
+    "lon": -122.34256,
+    "name": "N 45th St & Stone Way N",
+    "routeIds": [
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29557",
+    "direction": "W",
+    "id": "1_29557",
+    "lat": 47.662209,
+    "locationType": 0,
+    "lon": -122.345398,
+    "name": "N 46th St & Green Lake Way N",
+    "routeIds": [
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29580",
+    "direction": "W",
+    "id": "1_29580",
+    "lat": 47.662212,
+    "locationType": 0,
+    "lon": -122.350441,
+    "name": "N 46th St & Fremont Ave N",
+    "routeIds": [
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29600",
+    "direction": "W",
+    "id": "1_29600",
+    "lat": 47.662212,
+    "locationType": 0,
+    "lon": -122.354324,
+    "name": "N 46th St & Phinney Ave N",
+    "routeIds": [
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29620",
+    "direction": "W",
+    "id": "1_29620",
+    "lat": 47.663639,
+    "locationType": 0,
+    "lon": -122.357941,
+    "name": "NW Market St & NW 48th St",
+    "routeIds": [
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29630",
+    "direction": "NW",
+    "id": "1_29630",
+    "lat": 47.665184,
+    "locationType": 0,
+    "lon": -122.359619,
+    "name": "NW Market St & NW 50th St",
+    "routeIds": [
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29640",
+    "direction": "NW",
+    "id": "1_29640",
+    "lat": 47.667763,
+    "locationType": 0,
+    "lon": -122.361328,
+    "name": "NW Market St & 3rd Ave NW",
+    "routeIds": [
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29650",
+    "direction": "W",
+    "id": "1_29650",
+    "lat": 47.668751,
+    "locationType": 0,
+    "lon": -122.363228,
+    "name": "NW Market St & 5th Ave NW",
+    "routeIds": [
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29660",
+    "direction": "W",
+    "id": "1_29660",
+    "lat": 47.668735,
+    "locationType": 0,
+    "lon": -122.366493,
+    "name": "NW Market St & 8th Ave NW",
+    "routeIds": [
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29680",
+    "direction": "W",
+    "id": "1_29680",
+    "lat": 47.668735,
+    "locationType": 0,
+    "lon": -122.371284,
+    "name": "NW Market St & 11th Ave NW",
+    "routeIds": [
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29700",
+    "direction": "W",
+    "id": "1_29700",
+    "lat": 47.668735,
+    "locationType": 0,
+    "lon": -122.376633,
+    "name": "NW Market St & 15th Ave NW",
+    "routeIds": [
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29720",
+    "direction": "W",
+    "id": "1_29720",
+    "lat": 47.668739,
+    "locationType": 0,
+    "lon": -122.382423,
+    "name": "NW Market St & 20th Ave NW",
+    "routeIds": [
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "29865",
+    "direction": "E",
+    "id": "1_29865",
+    "lat": 47.661236,
+    "locationType": 0,
+    "lon": -122.317299,
+    "name": "NE 45th St & Roosevelt Way NE",
+    "routeIds": [
+      "1_100224",
+      "1_100059",
+      "1_100088",
+      "40_586",
+      "29_810",
+      "29_821",
+      "29_855",
+      "29_860",
+      "29_871",
+      "29_880"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "75407",
+    "direction": "SE",
+    "id": "1_75407",
+    "lat": 47.667099,
+    "locationType": 0,
+    "lon": -122.361046,
+    "name": "NW Market St & 3rd Ave NW",
+    "routeIds": [
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  },
+  {
+    "code": "98360",
+    "direction": "E",
+    "id": "1_98360",
+    "lat": 47.650875,
+    "locationType": 0,
+    "lon": -122.304581,
+    "name": "NE Pacific Pl & Montlake Blvd NE",
+    "routeIds": [
+      "1_100224"
+    ],
+    "wheelchairBoarding": "UNKNOWN"
+  }
+]
+#+end_example
+
+Here's the Eastbound Market and 15th stop id: 1_29215
+
+* Arrival Times
+
+Given a stop id, we can get the next arrivals times, expressed in
+epoch milliseconds.
+
+#+BEGIN_SRC shell :results pp drawer
+  OBA_KEY=$(<~/.oba-key)
+  curl "http://api.pugetsound.onebusaway.org/api/where/arrivals-and-departures-for-stop/1_29215.json?key=$OBA_KEY" | jq '.data.entry.arrivalsAndDepartures | map(.predictedArrivalTime)'
+#+END_SRC
+
+#+RESULTS:
+:RESULTS:
+[
+  1454804060000,
+  1454804671000,
+  1454805216000,
+  1454805931000
+]
+:END:
+
+
+
+
