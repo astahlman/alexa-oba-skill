@@ -1,34 +1,11 @@
-# blah
+# Overview
 
-FIXME: description
+Work-in-progress [Alexa skill](https://developer.amazon.com/ASK) for getting real-time transit data in Seattle using the [One Bus Away API](http://onebusaway.org/).
 
-## Installation
+# Build Status
+[![Build Status](https://travis-ci.org/astahlman/alexa-oba-skill.svg?branch=master)](https://travis-ci.org/astahlman/alexa-oba-skill)
 
-Download from http://example.com/FIXME.
-
-## Usage
-
-FIXME: explanation
-
-    $ java -jar blah-0.1.0-standalone.jar [args]
-
-## Options
-
-FIXME: listing of options this app accepts.
-
-## Examples
-
-...
-
-### Bugs
-
-...
-
-### Any Other Sections
-### That You Think
-### Might be Useful
-
-## License
+# License
 
 Copyright © 2015 FIXME
 
